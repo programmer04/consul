@@ -215,6 +215,108 @@ func TestAPI_CatalogService(t *testing.T) {
 	})
 }
 
+func TestAPI_CatalogService_SingleTag(t *testing.T) {
+	t.Parallel()
+	c, s := makeClientWithConfig(t, nil, func(conf *testutil.TestServerConfig) {
+		conf.NodeName = "node123"
+	})
+	defer s.Stop()
+
+	agent := c.Agent()
+	catalog := c.Catalog()
+
+	reg := &AgentServiceRegistration{
+		Name: "foo",
+		ID:   "foo1",
+		Tags: []string{"bar"},
+	}
+	if err := agent.ServiceRegister(reg); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer agent.ServiceDeregister("foo1")
+
+	retry.Run(t, func(r *retry.R) {
+		services, meta, err := catalog.Service("foo", "bar", nil)
+		if err != nil {
+			r.Fatal(err)
+		}
+		if meta.LastIndex == 0 {
+			r.Fatalf("Bad: %v", meta)
+		}
+		if len(services) != 1 {
+			r.Fatalf("Bad: %v", services)
+		}
+		if services[0].ServiceID != "foo1" {
+			r.Fatalf("Bad: %v", services[0].ServiceID)
+		}
+	})
+}
+
+func TestAPI_CatalogService_MultipleTags(t *testing.T) {
+	t.Parallel()
+	c, s := makeClientWithConfig(t, nil, func(conf *testutil.TestServerConfig) {
+		conf.NodeName = "node123"
+	})
+	defer s.Stop()
+
+	agent := c.Agent()
+	catalog := c.Catalog()
+
+	// Make two services with a check
+	reg := &AgentServiceRegistration{
+		Name: "foo",
+		ID:   "foo1",
+		Tags: []string{"bar"},
+	}
+	if err := agent.ServiceRegister(reg); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer agent.ServiceDeregister("foo1")
+
+	reg2 := &AgentServiceRegistration{
+		Name: "foo",
+		ID:   "foo2",
+		Tags: []string{"bar", "v2"},
+	}
+	if err := agent.ServiceRegister(reg2); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	defer agent.ServiceDeregister("foo2")
+
+	// Test searching with one tag (two results)
+	retry.Run(t, func(r *retry.R) {
+		services, meta, err := catalog.ServiceMultipleTags("foo", []string{"bar"}, nil)
+		if err != nil {
+			r.Fatal(err)
+		}
+		if meta.LastIndex == 0 {
+			r.Fatalf("Bad: %v", meta)
+		}
+		// Should be 2 services with the `bar` tag
+		if len(services) != 2 {
+			r.Fatalf("Bad: %v", services)
+		}
+	})
+
+	// Test searching with two tags (one result)
+	retry.Run(t, func(r *retry.R) {
+		services, meta, err := catalog.ServiceMultipleTags("foo", []string{"bar", "v2"}, nil)
+		if err != nil {
+			r.Fatal(err)
+		}
+		if meta.LastIndex == 0 {
+			r.Fatalf("Bad: %v", meta)
+		}
+		// Should be exactly 1 service
+		if len(services) != 1 {
+			r.Fatalf("Bad: %v", services)
+		}
+		if services[0].ServiceID != "foo2" {
+			r.Fatalf("Bad: %v", services[0].ServiceID)
+		}
+	})
+}
+
 func TestAPI_CatalogService_NodeMetaFilter(t *testing.T) {
 	t.Parallel()
 	meta := map[string]string{"somekey": "somevalue"}
